@@ -1,19 +1,71 @@
-# test task
-# part 1: getting to philosophy law
-'''
-    Receive a Wikipedia link as input,
-    go to next normal link on the page,
-    repeat until:
-    (a) philosophy page reached
-    (b) no more outgoing wikilinks
-    (c) stuck in a loop
-'''
-
 import sys
 import requests
 from bs4 import BeautifulSoup
-import re
+from bs4 import SoupStrainer
 from time import sleep
+
+# ==== check if link's parents include
+# ==== only elements in main text of article
+def has_bad_parents(alink):
+    allowed_parents = ["[document]", "div", "p", "b", "ul", "ol", "li"]
+    for parent in alink.parents:
+        if parent.name not in allowed_parents:
+            return True
+    return False
+
+# ==== check if link contains words in italic ====
+def is_italic(alink):
+    not_allowed_children = ["i"]
+    for child in alink.children:
+        if child.name in not_allowed_children:
+            return True
+    return False
+
+# ==== check if link points to missing article ====
+def is_missing_link(alink):
+    if alink.get("class")=="new":
+        return True
+    else:
+        return False
+
+# ==== check if link points to Wikipedia article ====
+def is_internal(alink):
+    if (alink.get("href") is not None
+        and alink.get("href").startswith("/wiki/")):
+        return True
+    else:
+        return False
+
+# ==== check if link is parenthesized ====
+def is_in_pars(atag):
+    in_pars = False
+
+    # loop over all siblings that
+    # precede the selected tag
+    for sib in atag.previous_siblings:
+        # exit if there's nothing
+        # that precedes the link
+        # at the same level of the tree
+        # (no text, no other tags)
+        if sib is None: break
+
+        # skip siblings that are not text
+        if sib.name is not None: continue
+
+        # if there is some text,
+        # get first parenthesis (if any)
+        # beware: string must be reversed
+        for char in sib.string[::-1]:
+            if char == ")":
+                # if first parenthesis is closed,
+                # link is not parenthesized
+                return in_pars
+            elif char == "(":
+                in_pars = True
+                return in_pars
+
+    # returns False if link not parenthesized
+    return in_pars
 
 
 def get_wikilinks(page_url):
@@ -21,51 +73,53 @@ def get_wikilinks(page_url):
     html_page = requests.get(page_url)
 
     # ==== parse page and build tree ====
-    parsed_html = BeautifulSoup(html_page.text, "html.parser")
+    # parse main text only
+    only_main_text = SoupStrainer("div", class_ = "mw-parser-output")
+    parsed_html = BeautifulSoup(html_page.text,
+                                "html.parser",
+                                parse_only=only_main_text)
 
     # ==== find wikilinks ====
-    # get all paragraphs that are direct
-    # children of <div class="mw-parser-output">
-    # this avoids selecting paragraphs that
-    # may have been mistakenly used in tables
-    # (check the link "Cognition" on en.wikipedia.org/Problem_solving, for example)
-    main_pars = parsed_html.select("div.mw-parser-output > p")
+    # get all paragraphs + lists
+    parlist = parsed_html.select("p, ul, ol")
 
-    # prune links
-    pruned_links = list()
-    # remove external links
-    for p in main_pars:
-        internal_l = [l for l in p.find_all("a", href=re.compile("^/wiki/"))]
-        pruned_links += internal_l
-
-    # remove links in italic (but not in bold) as well as
-    # links to IPA pronunciation, Wiktionary (non-latin words), etc.
-    # leaving only bold or plain text links
-    pruned_links = [l for l in pruned_links if l.parent.name in ["p", "b"]]
-    # remove links to missing pages
-    pruned_links = [l for l in pruned_links if l.get("class") != "new"]
-
-    # remaining links are plain Wikipedia links
-    # remove parenthesized links
+    # initialize empty list
+    # will store all normal wikilinks
     wikilinks = list()
+
+    # get all links
+    links = list()
+    for p in parlist:
+        all_links_in_p = p.find_all("a")
+        if all_links_in_p is not None:
+            links += all_links_in_p
+    # if no links, return here
+    if not links: return wikilinks
+
+    # remove links in italic (but not in bold)
+    # remove links to IPA pronunciation, Wiktionary (non-latin words), etc.
+    # remove links to missing articles
+    pruned_links = [l for l in links
+                    if has_bad_parents(l) is False
+                    and is_italic(l) is False
+                    and is_missing_link(l) is False
+                    and is_internal(l) is True]
+    # if no normal links, return here
+    if not pruned_links: return wikilinks
+
+    # remove parenthesized links
     for l in pruned_links:
-        par_balance = 0
-        # loop over previous text
-        # up to start of paragraph
-        for s in l.previous_siblings:
-            # if string is null,
-            # skip iteration
-            if s.string is None: continue
-            # else, count parentheses
-            if "(" in s.string:
-                par_balance += 1
-            if ")" in s.string:
-                par_balance -= 1
-        # normal wikilink if parentheses are balanced
-        if par_balance == 0: wikilinks.append(l)
+        # link may be child
+        # of bold tag, if so
+        # go up one node and search from there
+        if l.parent.name == "b":
+            l = l.parent
+
+        if is_in_pars(l) is False: wikilinks.append(l)
 
     # returns list of normal wikilinks
     return wikilinks
+
 
 
 # ==== getting to philosophy ====
@@ -98,6 +152,11 @@ def main():
             break
 
         # got to philosophy?
+        '''
+        Many wikilinks redirect to the "Philosophy"
+        Wikipedia article. I added just the most
+        relevant one to this script.
+        '''
         if top_link in ["/wiki/Philosophy", "/wiki/Philosophical"]:
             print("Last: ", new_url)
             print("Got to Philosophy.")
@@ -107,10 +166,10 @@ def main():
         links.append(top_link)
         page_url = new_url
         print("Next: ", page_url)
-        # wait one second
-        # before querying Wikipedia again
-        sleep(1.0)
+        # wait half a second
+        # before sending the next query 
+        sleep(0.5)
 
-# run main script
+# ==== run main script ====
 if __name__ == "__main__":
     main()
