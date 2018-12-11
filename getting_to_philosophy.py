@@ -114,8 +114,12 @@ def get_wikilinks(page_url):
         # go up one node and search from there
         if l.parent.name == "b":
             l = l.parent
-
-        if is_in_pars(l) is False: wikilinks.append(l)
+            if is_in_pars(l) is False:
+                # go down and return to link tag
+                l = l.find_next()
+                wikilinks.append(l)
+        else:
+            if is_in_pars(l) is False: wikilinks.append(l)
 
     # returns list of normal wikilinks
     return wikilinks
@@ -167,7 +171,7 @@ def main():
         page_url = new_url
         print("Next: ", page_url)
         # wait half a second
-        # before sending the next query 
+        # before sending the next query
         sleep(0.5)
 
 # ==== run main script ====
