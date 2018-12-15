@@ -9,5 +9,5 @@
   
 2. **Sentiment analysis on Twitter dataset**:
    - Clean and analyze tweet sentiment. 
-   - Demonstrate Zipf's Law (word frequency vs. ranking). 
+   - Demonstrate Zipf's Law (word frequency inv. proportional to ranking). 
    - Build classifier to predict sentiment of tweets.
